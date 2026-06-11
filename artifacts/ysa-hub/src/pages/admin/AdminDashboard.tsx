@@ -149,6 +149,9 @@ export default function AdminDashboard() {
   const [composing, setComposing] = useState(false);
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState<ReminderDraft>(DEFAULT_DRAFT);
+  const [deliveryResults, setDeliveryResults] = useState<
+    Record<string, { emailCount: number; whatsappCount: number; errors: string[] }>
+  >({});
 
   const nextSat = getNextSaturday();
 
@@ -279,27 +282,106 @@ export default function AdminDashboard() {
     }
 
     setSending(true);
-    const fullTitle = `${CHANNEL_PREFIX[draft.channel]} ${draft.title.trim()}`;
-    const { error } = await supabase.from("reminders").insert({
-      title: fullTitle,
-      message: draft.message.trim(),
-      scheduled_for: getScheduledAt(draft.schedule),
-      recipient_type: draft.targetType === "ward" ? "specific" : draft.targetType,
-      activity_id: draft.targetType === "activity" ? draft.activityId : null,
-      recipient_ids: draft.targetType === "ward" ? [draft.ward] : null,
-      sent: draft.schedule === "now",
-      created_at: new Date().toISOString(),
-    });
-    setSending(false);
 
-    if (error) {
-      toast.error("Failed to send reminder: " + error.message);
-    } else {
-      toast.success(draft.schedule === "now" ? "Reminder sent!" : "Reminder scheduled!");
-      setDraft(DEFAULT_DRAFT);
-      setComposing(false);
-      loadReminders();
+    // 1. Fetch matching recipient profiles from Supabase
+    let profileQuery = supabase
+      .from("profiles")
+      .select("id, name, email, phone, notify_email, notify_whatsapp")
+      .eq("role", "student");
+
+    if (draft.targetType === "activity") {
+      profileQuery = profileQuery.eq("activity_id", draft.activityId);
+    } else if (draft.targetType === "ward") {
+      profileQuery = profileQuery.eq("ward", draft.ward);
     }
+
+    const { data: profiles, error: profileError } = await profileQuery;
+    if (profileError) {
+      toast.error("Failed to load recipients: " + profileError.message);
+      setSending(false);
+      return;
+    }
+
+    const recipients = (profiles ?? []).map((p) => ({
+      name: p.name,
+      email: p.email ?? undefined,
+      phone: p.phone ?? undefined,
+    }));
+
+    if (recipients.length === 0) {
+      toast.error("No members found for the selected target");
+      setSending(false);
+      return;
+    }
+
+    // 2. Insert the reminder record (sent: false until confirmed)
+    const fullTitle = `${CHANNEL_PREFIX[draft.channel]} ${draft.title.trim()}`;
+    const { data: inserted, error: insertError } = await supabase
+      .from("reminders")
+      .insert({
+        title: fullTitle,
+        message: draft.message.trim(),
+        scheduled_for: getScheduledAt(draft.schedule),
+        recipient_type: draft.targetType === "ward" ? "specific" : draft.targetType,
+        activity_id: draft.targetType === "activity" ? draft.activityId : null,
+        recipient_ids: draft.targetType === "ward" ? [draft.ward] : null,
+        sent: false,
+        created_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !inserted) {
+      toast.error("Failed to save reminder: " + (insertError?.message ?? "unknown error"));
+      setSending(false);
+      return;
+    }
+
+    const reminderId: string = inserted.id;
+
+    // 3. If "send now", call the API server to dispatch emails/WhatsApp
+    if (draft.schedule === "now") {
+      try {
+        const resp = await fetch("/api/reminders/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: draft.title.trim(),
+            message: draft.message.trim(),
+            channel: draft.channel,
+            recipients,
+          }),
+        });
+
+        const delivery = await resp.json() as {
+          emailCount: number;
+          whatsappCount: number;
+          errors: string[];
+        };
+
+        // 4. Mark the reminder as sent in Supabase
+        await supabase.from("reminders").update({ sent: true }).eq("id", reminderId);
+
+        // 5. Store delivery result for display in the log
+        setDeliveryResults((prev) => ({ ...prev, [reminderId]: delivery }));
+
+        const parts: string[] = [];
+        if (delivery.emailCount > 0) parts.push(`${delivery.emailCount} email${delivery.emailCount !== 1 ? "s" : ""}`);
+        if (delivery.whatsappCount > 0) parts.push(`${delivery.whatsappCount} WhatsApp`);
+        const sent = parts.length > 0 ? `Sent: ${parts.join(" + ")}` : "Dispatched";
+        const errs = delivery.errors.length > 0 ? ` (${delivery.errors.length} failed)` : "";
+        toast.success(`${sent}${errs}`);
+      } catch {
+        toast.error("Reminder saved but dispatch failed — check your API server");
+      }
+    } else {
+      toast.success(`Reminder scheduled for ${draft.schedule === "friday-6pm" ? "Friday 6 PM" : "Saturday 8 AM"}`);
+    }
+
+    setSending(false);
+    setDraft(DEFAULT_DRAFT);
+    setComposing(false);
+    loadReminders();
   }
 
   async function deleteReminder(id: string) {
@@ -643,6 +725,10 @@ export default function AdminDashboard() {
             <div className="space-y-2">
               {reminders.map((r) => {
                 const { badge, clean } = parseChannel(r.title);
+                const delivery = deliveryResults[r.id];
+                const deliveryParts: string[] = [];
+                if (delivery?.emailCount) deliveryParts.push(`${delivery.emailCount} email`);
+                if (delivery?.whatsappCount) deliveryParts.push(`${delivery.whatsappCount} WA`);
                 return (
                   <div key={r.id} className="flex items-start gap-3 py-2.5 border-b border-slate-50 last:border-0">
                     <div className="flex-1 min-w-0">
@@ -653,8 +739,19 @@ export default function AdminDashboard() {
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
-                          {r.sent ? "Sent" : "Scheduled"}
+                          {r.sent ? "✓ Sent" : "Scheduled"}
                         </span>
+                        {delivery && deliveryParts.length > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 shrink-0">
+                            {deliveryParts.join(" + ")} delivered
+                          </span>
+                        )}
+                        {delivery && delivery.errors.length > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 shrink-0"
+                            title={delivery.errors.join("\n")}>
+                            {delivery.errors.length} failed
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 line-clamp-1">{r.message}</p>
                       <div className="flex items-center gap-3 mt-1 flex-wrap">
