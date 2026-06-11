@@ -23,6 +23,7 @@ interface FormData {
   activityId: string;
   // instructor-specific
   instructingActivityId: string;
+  inviteCode: string;
   // notifications
   notifyEmail: boolean;
   notifyWhatsapp: boolean;
@@ -40,8 +41,10 @@ export default function SignUpPage() {
     name: "", phone: "", signUpRole: "",
     churchStatus: "", ward: "", referralSource: "", activityId: "",
     instructingActivityId: "",
+    inviteCode: "",
     notifyEmail: true, notifyWhatsapp: false,
   });
+  const [inviteCodeError, setInviteCodeError] = useState("");
 
   const set = <K extends keyof FormData>(k: K, v: FormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -63,6 +66,16 @@ export default function SignUpPage() {
       if (!form.activityId) { toast.error("Please choose a skill class"); return false; }
     }
     if (form.signUpRole === "instructor") {
+      const correctCode = import.meta.env.VITE_INSTRUCTOR_INVITE_CODE;
+      if (!form.inviteCode.trim()) {
+        setInviteCodeError("Invalid instructor code. Please contact your administrator.");
+        return false;
+      }
+      if (form.inviteCode.trim() !== correctCode) {
+        setInviteCodeError("Invalid instructor code. Please contact your administrator.");
+        return false;
+      }
+      setInviteCodeError("");
       if (!form.ward) { toast.error("Ward is required"); return false; }
       if (!form.instructingActivityId) { toast.error("Please choose the skill you instruct"); return false; }
     }
@@ -237,7 +250,7 @@ export default function SignUpPage() {
                     { value: "student" as SignUpRole, emoji: "🎓", label: "Student", desc: "I want to learn a skill" },
                     { value: "instructor" as SignUpRole, emoji: "👨‍🏫", label: "Instructor", desc: "I will teach a skill" },
                   ].map(({ value, emoji, label, desc }) => (
-                    <button key={value} type="button" onClick={() => { set("signUpRole", value); set("churchStatus", ""); set("ward", ""); }}
+                    <button key={value} type="button" onClick={() => { set("signUpRole", value); set("churchStatus", ""); set("ward", ""); setInviteCodeError(""); }}
                       className={`p-4 rounded-xl border-2 text-left transition-all ${form.signUpRole === value ? "border-amber-400 bg-amber-400/5" : "border-slate-200 hover:border-slate-300"}`}>
                       <div className="text-2xl mb-1.5">{emoji}</div>
                       <p className={`font-semibold text-sm ${form.signUpRole === value ? "text-amber-700" : "text-[#0F172A]"}`}>{label}</p>
@@ -310,6 +323,19 @@ export default function SignUpPage() {
               {/* ── INSTRUCTOR flow ── */}
               {form.signUpRole === "instructor" && (
                 <div className="space-y-4" style={{ animation: "slideDown 0.25s ease-out" }}>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Instructor Invite Code *</label>
+                    <input
+                      type="text"
+                      value={form.inviteCode}
+                      onChange={(e) => { set("inviteCode", e.target.value); setInviteCodeError(""); }}
+                      placeholder="Enter your invite code"
+                      className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 ${inviteCodeError ? "border-red-400 bg-red-50" : "border-slate-300"}`}
+                    />
+                    {inviteCodeError && (
+                      <p className="mt-1.5 text-xs text-red-600 font-medium">{inviteCodeError}</p>
+                    )}
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">Your Ward *</label>
                     <select value={form.ward} onChange={(e) => set("ward", e.target.value)}
