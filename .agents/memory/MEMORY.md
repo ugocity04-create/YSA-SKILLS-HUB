@@ -1,0 +1,3 @@
+- [YSA Hub project](ysa-hub-project.md) — Supabase-backed Saturday skills app; signup bug fix, admin promotion, and activity ID conventions.
+- [Role schema changes](role-schema.md) — profiles.role is 'student'|'instructor'|'admin'; member_status is 'member'|'friend'. SQL at artifacts/ysa-hub/supabase-setup.sql must be run in Supabase to fix RLS + schema.
+- [Instructor profile display](instructor-profile.md) — instructors use instructing_activity_id (not activity_id); ProfilePage must branch on profile.role === 'instructor' for all activity reads/writes. Auth triggers on auth.users block signup — remove them; app handles profile creation directly.
