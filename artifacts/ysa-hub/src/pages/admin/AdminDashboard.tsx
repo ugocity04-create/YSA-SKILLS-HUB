@@ -331,7 +331,7 @@ export default function AdminDashboard() {
         sent: false,
         created_at: new Date().toISOString(),
       })
-      .select("id")
+      .select("*")
       .single();
 
     if (insertError || !inserted) {
@@ -377,8 +377,18 @@ export default function AdminDashboard() {
           console.error("Supabase sent-update failed:", updateErr.message);
         }
 
-        // 5. Store delivery result — this is the source of truth for the badge in this session
+        // 5. Store delivery result and immediately mark the reminder as sent in local state.
+        // Both ensure the "Sent" badge is shown right away without depending on loadReminders()
+        // timing or the best-effort Supabase update above.
         setDeliveryResults((prev) => ({ ...prev, [reminderId]: delivery }));
+        setReminders((prev) => {
+          const sentReminder: Reminder = { ...(inserted as unknown as Reminder), sent: true };
+          const exists = prev.some((r) => r.id === reminderId);
+          if (exists) {
+            return prev.map((r) => r.id === reminderId ? sentReminder : r);
+          }
+          return [sentReminder, ...prev];
+        });
 
         const parts: string[] = [];
         if (delivery.emailCount > 0) parts.push(`${delivery.emailCount} email${delivery.emailCount !== 1 ? "s" : ""}`);
