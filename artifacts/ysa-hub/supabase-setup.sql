@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS public.reminders (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title          text NOT NULL,
   message        text NOT NULL,
+  channel        text NOT NULL DEFAULT 'email' CHECK (channel IN ('email', 'whatsapp', 'both')),
   scheduled_for  timestamptz NOT NULL,
   recipient_type text DEFAULT 'all' CHECK (recipient_type IN ('all', 'activity', 'specific')),
   activity_id    text,

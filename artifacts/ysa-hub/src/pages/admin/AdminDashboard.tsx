@@ -321,6 +321,7 @@ export default function AdminDashboard() {
       .insert({
         title: fullTitle,
         message: draft.message.trim(),
+        channel: draft.channel,
         scheduled_for: getScheduledAt(draft.schedule),
         recipient_type: draft.targetType === "ward" ? "specific" : draft.targetType,
         activity_id: draft.targetType === "activity" ? draft.activityId : null,

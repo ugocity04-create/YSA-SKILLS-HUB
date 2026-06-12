@@ -66,6 +66,7 @@ export interface Reminder {
   id: string;
   title: string;
   message: string;
+  channel: "email" | "whatsapp" | "both";
   scheduled_for: string;
   recipient_type: ReminderRecipientType;
   activity_id?: string;
