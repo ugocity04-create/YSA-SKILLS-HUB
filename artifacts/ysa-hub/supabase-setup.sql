@@ -172,10 +172,14 @@ CREATE POLICY "update_transfer" ON public.transfer_requests FOR UPDATE TO authen
 -- REMINDERS
 DROP POLICY IF EXISTS "read_reminders"   ON public.reminders;
 DROP POLICY IF EXISTS "insert_reminders" ON public.reminders;
+DROP POLICY IF EXISTS "update_reminders" ON public.reminders;
 DROP POLICY IF EXISTS "delete_reminders" ON public.reminders;
+
+ALTER TABLE public.reminders ADD COLUMN IF NOT EXISTS recipient_ids text[];
 
 CREATE POLICY "read_reminders"   ON public.reminders FOR SELECT TO authenticated USING (true);
 CREATE POLICY "insert_reminders" ON public.reminders FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "update_reminders" ON public.reminders FOR UPDATE TO authenticated USING (true);
 CREATE POLICY "delete_reminders" ON public.reminders FOR DELETE TO authenticated USING (true);
 
 -- NOTIFICATIONS
