@@ -355,26 +355,40 @@ export default function AdminDashboard() {
           }),
         });
 
+        // Check for non-2xx before trying to parse as delivery result
+        if (!resp.ok) {
+          const errBody = await resp.json().catch(() => ({})) as { error?: string };
+          throw new Error(errBody.error ?? `Server error (HTTP ${resp.status})`);
+        }
+
         const delivery = await resp.json() as {
           emailCount: number;
           whatsappCount: number;
           errors: string[];
         };
 
-        // 4. Mark the reminder as sent in Supabase
-        await supabase.from("reminders").update({ sent: true }).eq("id", reminderId);
+        // 4. Mark sent in Supabase — best effort; log if it fails
+        const { error: updateErr } = await supabase
+          .from("reminders")
+          .update({ sent: true })
+          .eq("id", reminderId);
+        if (updateErr) {
+          console.error("Supabase sent-update failed:", updateErr.message);
+        }
 
-        // 5. Store delivery result for display in the log
+        // 5. Store delivery result — this is the source of truth for the badge in this session
         setDeliveryResults((prev) => ({ ...prev, [reminderId]: delivery }));
 
         const parts: string[] = [];
         if (delivery.emailCount > 0) parts.push(`${delivery.emailCount} email${delivery.emailCount !== 1 ? "s" : ""}`);
         if (delivery.whatsappCount > 0) parts.push(`${delivery.whatsappCount} WhatsApp`);
-        const sent = parts.length > 0 ? `Sent: ${parts.join(" + ")}` : "Dispatched";
-        const errs = delivery.errors.length > 0 ? ` (${delivery.errors.length} failed)` : "";
-        toast.success(`${sent}${errs}`);
-      } catch {
-        toast.error("Reminder saved but dispatch failed — check your API server");
+        const sentMsg = parts.length > 0 ? `Sent: ${parts.join(" + ")}` : "Dispatched (0 delivered — check recipient contact info)";
+        const errs = (delivery.errors ?? []).length > 0 ? ` · ${delivery.errors.length} failed` : "";
+        toast.success(`${sentMsg}${errs}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Reminder dispatch error:", msg);
+        toast.error(`Dispatch failed: ${msg}`);
       }
     } else {
       toast.success(`Reminder scheduled for ${draft.schedule === "friday-6pm" ? "Friday 6 PM" : "Saturday 8 AM"}`);
@@ -728,6 +742,8 @@ export default function AdminDashboard() {
               {reminders.map((r) => {
                 const { badge, clean } = parseChannel(r.title);
                 const delivery = deliveryResults[r.id];
+                // deliveryResults is the source of truth for "sent" in this session
+                const isSent = r.sent || !!delivery;
                 const deliveryParts: string[] = [];
                 if (delivery?.emailCount) deliveryParts.push(`${delivery.emailCount} email`);
                 if (delivery?.whatsappCount) deliveryParts.push(`${delivery.whatsappCount} WA`);
@@ -737,11 +753,11 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
                         <p className="text-sm font-medium text-[#0F172A] truncate">{clean}</p>
                         <span className={`text-xs px-1.5 py-0.5 rounded border shrink-0 ${
-                          r.sent
+                          isSent
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
-                          {r.sent ? "✓ Sent" : "Scheduled"}
+                          {isSent ? "✓ Sent" : "Scheduled"}
                         </span>
                         {delivery && deliveryParts.length > 0 && (
                           <span className="text-xs px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 shrink-0">

@@ -66,12 +66,16 @@ function buildEmailHtml(name: string, title: string, message: string): string {
 router.post("/reminders/send", async (req, res) => {
   const { title, message, channel, recipients } = req.body as SendReminderBody;
 
+  req.log.info({ channel, recipientCount: Array.isArray(recipients) ? recipients.length : 0 }, "Reminder dispatch requested");
+
   if (!title || !message || !channel || !Array.isArray(recipients)) {
+    req.log.warn("Reminder dispatch rejected: missing required fields");
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
 
   if (recipients.length === 0) {
+    req.log.warn("Reminder dispatch rejected: no recipients");
     res.status(400).json({ error: "No recipients found for this target" });
     return;
   }
@@ -128,6 +132,10 @@ router.post("/reminders/send", async (req, res) => {
     }
   }
 
+  req.log.info(
+    { emailCount: result.emailCount, whatsappCount: result.whatsappCount, errors: result.errors.length },
+    "Reminder dispatch complete"
+  );
   res.json(result);
 });
 
