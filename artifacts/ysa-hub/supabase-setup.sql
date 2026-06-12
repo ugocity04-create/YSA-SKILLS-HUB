@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS public.reminders (
   title          text NOT NULL,
   message        text NOT NULL,
   channel        text NOT NULL DEFAULT 'email' CHECK (channel IN ('email', 'whatsapp', 'both')),
+  target_type    text NOT NULL DEFAULT 'all',
   scheduled_for  timestamptz NOT NULL,
   recipient_type text DEFAULT 'all' CHECK (recipient_type IN ('all', 'activity', 'specific')),
   activity_id    text,
@@ -105,6 +106,25 @@ CREATE TABLE IF NOT EXISTS public.reminders (
   sent           boolean DEFAULT false,
   created_at     timestamptz DEFAULT now()
 );
+
+-- Ensure existing tables have all columns with safe defaults (idempotent)
+ALTER TABLE public.reminders
+  ADD COLUMN IF NOT EXISTS channel        text,
+  ADD COLUMN IF NOT EXISTS target_type    text,
+  ADD COLUMN IF NOT EXISTS recipient_type text,
+  ADD COLUMN IF NOT EXISTS recipient_ids  text[],
+  ADD COLUMN IF NOT EXISTS activity_id    text,
+  ADD COLUMN IF NOT EXISTS sent           boolean;
+
+UPDATE public.reminders SET channel        = 'email' WHERE channel IS NULL;
+UPDATE public.reminders SET target_type    = 'all'   WHERE target_type IS NULL;
+UPDATE public.reminders SET recipient_type = 'all'   WHERE recipient_type IS NULL;
+UPDATE public.reminders SET sent           = false    WHERE sent IS NULL;
+
+ALTER TABLE public.reminders
+  ALTER COLUMN channel     SET DEFAULT 'email',
+  ALTER COLUMN target_type SET DEFAULT 'all',
+  ALTER COLUMN sent        SET DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.notifications (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
