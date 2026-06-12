@@ -150,8 +150,9 @@ export default function AdminDashboard() {
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState<ReminderDraft>(DEFAULT_DRAFT);
   const [deliveryResults, setDeliveryResults] = useState<
-    Record<string, { emailCount: number; whatsappCount: number; errors: string[] }>
+    Record<string, { emailCount: number; whatsappCount: number; skipped: number; errors: string[] }>
   >({});
+  const [expandedErrors, setExpandedErrors] = useState<Record<string, boolean>>({});
 
   const nextSat = getNextSaturday();
 
@@ -638,6 +639,16 @@ export default function AdminDashboard() {
                   </button>
                 ))}
               </div>
+              {(draft.channel === "whatsapp" || draft.channel === "both") && (
+                <div className="mt-2 flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="text-amber-500 text-xs mt-0.5">⚠</span>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    <strong>Twilio sandbox:</strong> each recipient must first text{" "}
+                    <code className="bg-amber-100 px-1 rounded">join &lt;sandbox-name&gt;</code>{" "}
+                    to your Twilio number before they can receive WhatsApp messages. Recipients who haven't opted in will appear as failures.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Target */}
@@ -742,51 +753,71 @@ export default function AdminDashboard() {
               {reminders.map((r) => {
                 const { badge, clean } = parseChannel(r.title);
                 const delivery = deliveryResults[r.id];
-                // deliveryResults is the source of truth for "sent" in this session
                 const isSent = r.sent || !!delivery;
                 const deliveryParts: string[] = [];
                 if (delivery?.emailCount) deliveryParts.push(`${delivery.emailCount} email`);
                 if (delivery?.whatsappCount) deliveryParts.push(`${delivery.whatsappCount} WA`);
+                const errorsShown = expandedErrors[r.id] ?? false;
                 return (
-                  <div key={r.id} className="flex items-start gap-3 py-2.5 border-b border-slate-50 last:border-0">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                        <p className="text-sm font-medium text-[#0F172A] truncate">{clean}</p>
-                        <span className={`text-xs px-1.5 py-0.5 rounded border shrink-0 ${
-                          isSent
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-700 border-amber-200"
-                        }`}>
-                          {isSent ? "✓ Sent" : "Scheduled"}
-                        </span>
-                        {delivery && deliveryParts.length > 0 && (
-                          <span className="text-xs px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 shrink-0">
-                            {deliveryParts.join(" + ")} delivered
+                  <div key={r.id} className="py-2.5 border-b border-slate-50 last:border-0">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                          <p className="text-sm font-medium text-[#0F172A] truncate">{clean}</p>
+                          <span className={`text-xs px-1.5 py-0.5 rounded border shrink-0 ${
+                            isSent
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                          }`}>
+                            {isSent ? "✓ Sent" : "Scheduled"}
                           </span>
-                        )}
-                        {delivery && delivery.errors.length > 0 && (
-                          <span className="text-xs px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 shrink-0"
-                            title={delivery.errors.join("\n")}>
-                            {delivery.errors.length} failed
+                          {delivery && deliveryParts.length > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 shrink-0">
+                              {deliveryParts.join(" + ")} delivered
+                            </span>
+                          )}
+                          {delivery && delivery.errors.length > 0 && (
+                            <button
+                              onClick={() => setExpandedErrors((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
+                              className="text-xs px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 shrink-0 hover:bg-red-100 transition-colors"
+                            >
+                              {delivery.errors.length} failed {errorsShown ? "▲" : "▼"}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 line-clamp-1">{r.message}</p>
+                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                          <span className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{badge}</span>
+                          <span className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{targetLabel(r)}</span>
+                          <span className="text-xs text-slate-400">
+                            <Clock className="w-3 h-3 inline mr-0.5" />
+                            {formatDateTime(r.scheduled_for)}
                           </span>
-                        )}
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-500 line-clamp-1">{r.message}</p>
-                      <div className="flex items-center gap-3 mt-1 flex-wrap">
-                        <span className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{badge}</span>
-                        <span className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{targetLabel(r)}</span>
-                        <span className="text-xs text-slate-400">
-                          <Clock className="w-3 h-3 inline mr-0.5" />
-                          {formatDateTime(r.scheduled_for)}
-                        </span>
-                      </div>
+                      <button
+                        onClick={() => deleteReminder(r.id)}
+                        className="shrink-0 w-7 h-7 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-500 flex items-center justify-center transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => deleteReminder(r.id)}
-                      className="shrink-0 w-7 h-7 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-500 flex items-center justify-center transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {delivery && delivery.errors.length > 0 && errorsShown && (
+                      <div className="mt-2 ml-0 bg-red-50 border border-red-100 rounded-lg p-3 space-y-1">
+                        <p className="text-xs font-semibold text-red-700 mb-1.5">Delivery failures:</p>
+                        {delivery.errors.map((e, i) => (
+                          <div key={i} className="flex items-start gap-1.5">
+                            <span className="text-red-400 text-xs mt-0.5 shrink-0">•</span>
+                            <p className="text-xs text-red-700 leading-relaxed break-words">{e}</p>
+                          </div>
+                        ))}
+                        {delivery.skipped > 0 && (
+                          <p className="text-xs text-slate-500 mt-1 pt-1 border-t border-red-100">
+                            {delivery.skipped} recipient{delivery.skipped !== 1 ? "s" : ""} skipped (no contact info for this channel)
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
