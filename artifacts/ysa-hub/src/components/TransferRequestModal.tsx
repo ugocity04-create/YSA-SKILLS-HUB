@@ -12,6 +12,10 @@ interface Props {
   onSuccess: () => void;
 }
 
+function activityName(id: string): string {
+  return ACTIVITIES.find((a) => a.id === id)?.name ?? id.replace(/-/g, " ");
+}
+
 export default function TransferRequestModal({ profile, currentActivityId, onClose, onSuccess }: Props) {
   const [toActivity, setToActivity] = useState("");
   const [reason, setReason] = useState("");
@@ -44,9 +48,22 @@ export default function TransferRequestModal({ profile, currentActivityId, onClo
     });
     setLoading(false);
     if (error) {
-      toast.error("Failed to submit transfer request");
+      toast.error("Failed to submit transfer request: " + error.message);
       return;
     }
+
+    fetch("/api/transfer-emails/submitted", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        studentEmail: profile.email,
+        studentName: profile.name,
+        fromActivity: activityName(currentActivityId),
+        toActivity: activityName(toActivity),
+        reason: reason.trim() || undefined,
+      }),
+    }).catch(() => {});
+
     toast.success("Transfer request submitted! Awaiting admin review.");
     onSuccess();
     onClose();
@@ -69,7 +86,7 @@ export default function TransferRequestModal({ profile, currentActivityId, onClo
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Current Class</label>
             <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600 capitalize">
-              {ACTIVITIES.find((a) => a.id === currentActivityId)?.name ?? currentActivityId.replace(/-/g, " ")}
+              {activityName(currentActivityId)}
             </div>
           </div>
           <div>
