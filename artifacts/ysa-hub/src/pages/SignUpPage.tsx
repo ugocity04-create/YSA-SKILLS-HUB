@@ -57,7 +57,7 @@ export default function SignUpPage() {
     return true;
   }
 
-  function validateStep2() {
+  async function validateStep2(): Promise<boolean> {
     if (!form.name.trim()) { toast.error("Name is required"); return false; }
     if (!form.signUpRole) { toast.error("Choose a role"); return false; }
     if (form.signUpRole === "student") {
@@ -66,13 +66,23 @@ export default function SignUpPage() {
       if (!form.activityId) { toast.error("Please choose a skill class"); return false; }
     }
     if (form.signUpRole === "instructor") {
-      const correctCode = import.meta.env.VITE_INSTRUCTOR_INVITE_CODE;
       if (!form.inviteCode.trim()) {
         setInviteCodeError("Invalid instructor code. Please contact your administrator.");
         return false;
       }
-      if (form.inviteCode.trim() !== correctCode) {
-        setInviteCodeError("Invalid instructor code. Please contact your administrator.");
+      try {
+        const res = await fetch("/api/validate-instructor-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: form.inviteCode.trim() }),
+        });
+        const data = await res.json() as { valid: boolean };
+        if (!data.valid) {
+          setInviteCodeError("Invalid instructor code. Please contact your administrator.");
+          return false;
+        }
+      } catch {
+        setInviteCodeError("Could not verify invite code. Please try again.");
         return false;
       }
       setInviteCodeError("");
@@ -362,7 +372,7 @@ export default function SignUpPage() {
                 <button onClick={() => setStep(1)} className="flex items-center gap-1 border border-slate-300 text-slate-600 px-4 py-2.5 rounded-lg text-sm hover:bg-slate-50">
                   <ChevronLeft className="w-4 h-4" /> Back
                 </button>
-                <button onClick={() => validateStep2() && setStep(3)}
+                <button onClick={async () => { if (await validateStep2()) setStep(3); }}
                   className="flex-1 flex items-center justify-center gap-2 bg-[#0F172A] text-white font-semibold py-2.5 rounded-lg hover:bg-slate-800 transition-colors">
                   Continue <ChevronRight className="w-4 h-4" />
                 </button>

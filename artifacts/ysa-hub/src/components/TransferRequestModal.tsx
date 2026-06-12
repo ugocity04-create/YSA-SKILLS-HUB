@@ -26,7 +26,14 @@ export default function TransferRequestModal({ profile, currentActivityId, onClo
       return;
     }
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("You must be signed in to submit a transfer request");
+      setLoading(false);
+      return;
+    }
     const { error } = await supabase.from("transfer_requests").insert({
+      user_id: user.id,
       member_id: profile.id,
       from_activity_id: currentActivityId,
       to_activity_id: toActivity,
