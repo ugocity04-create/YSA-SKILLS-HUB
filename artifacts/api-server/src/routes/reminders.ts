@@ -20,6 +20,7 @@ interface SendReminderBody {
 interface DeliveryResult {
   emailCount: number;
   whatsappCount: number;
+  skipped: number;
   errors: string[];
 }
 
@@ -29,6 +30,20 @@ function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.startsWith("0")) return `whatsapp:+234${digits.slice(1)}`;
   return `whatsapp:+${digits}`;
+}
+
+function isSandboxOptInError(err: unknown): boolean {
+  const e = err as { code?: number; status?: number; message?: string };
+  if (e.code === 63007) return true;
+  const msg = (e.message ?? "").toLowerCase();
+  return (
+    msg.includes("unregistered") ||
+    msg.includes("opt-in") ||
+    msg.includes("opted in") ||
+    msg.includes("sandbox") ||
+    msg.includes("channel:whatsapp") ||
+    msg.includes("not a whatsapp user")
+  );
 }
 
 function escapeHtml(str: string): string {
@@ -80,60 +95,88 @@ router.post("/reminders/send", async (req, res) => {
     return;
   }
 
-  const result: DeliveryResult = { emailCount: 0, whatsappCount: 0, errors: [] };
+  const result: DeliveryResult = { emailCount: 0, whatsappCount: 0, skipped: 0, errors: [] };
 
+  // ── Email ──────────────────────────────────────────────────────────────────
   if (channel === "email" || channel === "both") {
     const resendKey = process.env.RESEND_API_KEY;
     const fromEmail = process.env.RESEND_FROM_EMAIL;
     if (!resendKey || !fromEmail) {
-      result.errors.push("Resend credentials not configured on server");
+      result.errors.push("Email not configured: RESEND_API_KEY or RESEND_FROM_EMAIL missing on server");
     } else {
       const resend = new Resend(resendKey);
       const emailRecipients = recipients.filter((r) => r.email);
+      const noEmail = recipients.filter((r) => !r.email);
+
+      for (const recipient of noEmail) {
+        result.errors.push(`${recipient.name}: no email address on file — skipped`);
+        result.skipped++;
+      }
+
       for (const recipient of emailRecipients) {
-        try {
-          await resend.emails.send({
-            from: fromEmail,
-            to: recipient.email!,
-            subject: title,
-            html: buildEmailHtml(recipient.name, title, message),
-          });
+        // Resend SDK returns {data, error} — does NOT throw on API errors
+        const { error } = await resend.emails.send({
+          from: fromEmail,
+          to: recipient.email!,
+          subject: title,
+          html: buildEmailHtml(recipient.name, title, message),
+        });
+        if (error) {
+          const msg = (error as { message?: string }).message ?? JSON.stringify(error);
+          req.log.warn({ email: recipient.email, error }, "Email send failed");
+          result.errors.push(`${recipient.name} (${recipient.email}): ${msg}`);
+        } else {
           result.emailCount++;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          result.errors.push(`Email to ${recipient.email} failed: ${msg}`);
         }
       }
     }
   }
 
+  // ── WhatsApp ───────────────────────────────────────────────────────────────
   if (channel === "whatsapp" || channel === "both") {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     const from = process.env.TWILIO_WHATSAPP_FROM;
     if (!sid || !token || !from) {
-      result.errors.push("Twilio credentials not configured on server");
+      result.errors.push("WhatsApp not configured: Twilio credentials missing on server");
     } else {
       const client = twilio(sid, token);
       const waRecipients = recipients.filter((r) => r.phone);
+      const noPhone = recipients.filter((r) => !r.phone);
+
+      for (const recipient of noPhone) {
+        result.errors.push(`${recipient.name}: no phone number on file — skipped`);
+        result.skipped++;
+      }
+
       for (const recipient of waRecipients) {
+        const to = normalizePhone(recipient.phone!);
         try {
           await client.messages.create({
             from,
-            to: normalizePhone(recipient.phone!),
+            to,
             body: `Hi ${recipient.name}!\n\n${message}\n\n— YSA Skills Hub, Ojodu Stake`,
           });
           result.whatsappCount++;
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          result.errors.push(`WhatsApp to ${recipient.phone} failed: ${msg}`);
+          if (isSandboxOptInError(err)) {
+            const phone = to.replace("whatsapp:", "");
+            req.log.warn({ phone, recipient: recipient.name }, "WhatsApp sandbox opt-in required");
+            result.errors.push(
+              `${recipient.name} (${phone}): WhatsApp sandbox — must opt-in first by texting "join <sandbox-name>" to the Twilio number`
+            );
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            req.log.warn({ phone: to, error: msg }, "WhatsApp send failed");
+            result.errors.push(`${recipient.name} (${to.replace("whatsapp:", "")}): ${msg}`);
+          }
         }
       }
     }
   }
 
   req.log.info(
-    { emailCount: result.emailCount, whatsappCount: result.whatsappCount, errors: result.errors.length },
+    { emailCount: result.emailCount, whatsappCount: result.whatsappCount, skipped: result.skipped, errors: result.errors.length },
     "Reminder dispatch complete"
   );
   res.json(result);
