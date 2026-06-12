@@ -284,11 +284,16 @@ export default function AdminDashboard() {
 
     setSending(true);
 
-    // 1. Fetch matching recipient profiles from Supabase
+    // 1. Fetch matching recipient profiles from Supabase.
+    // Include everyone who is not an admin — students, instructors, and any
+    // "friend of the church" accounts — as long as they have a valid email
+    // and have not explicitly opted out (notify_email = false).
     let profileQuery = supabase
       .from("profiles")
       .select("id, name, email, phone, notify_email, notify_whatsapp")
-      .eq("role", "student");
+      .neq("role", "admin")
+      .not("email", "is", null)
+      .or("notify_email.is.null,notify_email.eq.true");
 
     if (draft.targetType === "activity") {
       profileQuery = profileQuery.eq("activity_id", draft.activityId);
@@ -303,7 +308,14 @@ export default function AdminDashboard() {
       return;
     }
 
-    const recipients = (profiles ?? []).map((p) => ({
+    // For WhatsApp channel, also honour notify_whatsapp preference
+    const filteredProfiles = (profiles ?? []).filter((p) => {
+      if (draft.channel === "whatsapp") return p.notify_whatsapp !== false;
+      if (draft.channel === "both") return true; // API handles per-channel skipping
+      return true; // email — already filtered at query level
+    });
+
+    const recipients = filteredProfiles.map((p) => ({
       name: p.name,
       email: p.email ?? undefined,
       phone: p.phone ?? undefined,
