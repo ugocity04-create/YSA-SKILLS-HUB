@@ -4,27 +4,21 @@ title = "YSA Skills Hub"
 version = "1.0.0"
 
 [[services]]
-localPort = 8082
+localPort = 5000
 name = "web"
 paths = ["/"]
 
-[services.env]
-PORT = "8082"
-BASE_PATH = "/"
-
 [services.development]
-run = "pnpm --filter @workspace/ysa-hub run dev"
+run = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/ysa-hub run dev"
 
 [services.production]
+serve = "static"
+publicDir = "artifacts/ysa-hub/dist/public"
 
 [services.production.build]
 args = ["pnpm", "--filter", "@workspace/ysa-hub", "run", "build"]
 
 [services.production.build.env]
 NODE_ENV = "production"
-PORT = "8082"
+PORT = "5000"
 BASE_PATH = "/"
-
-[services.production.serve]
-type = "static"
-publicDir = "artifacts/ysa-hub/dist/public"
